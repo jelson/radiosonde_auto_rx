@@ -72,6 +72,18 @@ class OziUploader(object):
         self.update_rate = update_rate
         self.station = station
 
+        # Set up our UDP socket
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.settimeout(1)
+        # Set up socket for broadcast, and allow re-use of the address
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Under OSX we also need to set SO_REUSEPORT to 1
+        try:
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except:
+            pass
+
         # Input Queue.
         self.input_queue = Queue()
 
@@ -99,19 +111,8 @@ class OziUploader(object):
         )
 
         try:
-            _ozisock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-            # Set up socket for broadcast, and allow re-use of the address
-            _ozisock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            _ozisock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Under OSX we also need to set SO_REUSEPORT to 1
             try:
-                _ozisock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            except:
-                pass
-
-            try:
-                _ozisock.sendto(
+                self._sock.sendto(
                     _sentence.encode("ascii"), (self.ozimux_host, self.ozimux_port)
                 )
             # Catch any socket errors, that may occur when attempting to send to a broadcast address
@@ -120,12 +121,9 @@ class OziUploader(object):
                 self.log_debug(
                     "Send to broadcast address failed, sending to localhost instead."
                 )
-                _ozisock.sendto(
+                self._sock.sendto(
                     _sentence.encode("ascii"), ("127.0.0.1", self.ozimux_port)
                 )
-
-            _ozisock.close()
-
         except Exception as e:
             self.log_error("Failed to send OziMux packet: %s" % str(e))
 
@@ -175,20 +173,8 @@ class OziUploader(object):
                 if _field in telemetry:
                     packet[_field] = telemetry[_field]
 
-            # Set up our UDP socket
-            _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            _s.settimeout(1)
-            # Set up socket for broadcast, and allow re-use of the address
-            _s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Under OSX we also need to set SO_REUSEPORT to 1
             try:
-                _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            except:
-                pass
-
-            try:
-                _s.sendto(
+                self._sock.sendto(
                     json.dumps(packet).encode("ascii"),
                     (self.payload_summary_host, self.payload_summary_port),
                 )
@@ -198,12 +184,10 @@ class OziUploader(object):
                 self.log_debug(
                     "Send to broadcast address failed, sending to localhost instead."
                 )
-                _s.sendto(
+                self._sock.sendto(
                     json.dumps(packet).encode("ascii"),
                     ("127.0.0.1", self.payload_summary_port),
                 )
-
-            _s.close()
 
         except Exception as e:
             self.log_error("Error sending Payload Summary: %s" % str(e))
@@ -266,6 +250,11 @@ class OziUploader(object):
             self.input_thread.join(60)
             if self.input_thread.is_alive():
                 self.log_error("ozimux input thread failed to join")
+
+        try:
+            self._sock.close()
+        except Exception:
+            pass
 
     def log_debug(self, line):
         """ Helper function to log a debug message with a descriptive heading. 
